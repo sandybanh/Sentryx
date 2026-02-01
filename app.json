@@ -69,7 +69,8 @@
         }
       ],
       "expo-notifications",
-      "expo-av"
+      "expo-av",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

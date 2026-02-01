@@ -12,9 +12,17 @@ export interface EmergencyContactRow extends EmergencyContactInput {
 }
 
 export async function getEmergencyContacts(): Promise<EmergencyContactRow[]> {
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData?.user;
+  if (!user) {
+    console.warn('Cannot fetch contacts: No authenticated user');
+    return [];
+  }
+
   const { data, error } = await supabase
     .from('emergency_contacts')
     .select('*')
+    .eq('user_id', user.id)
     .order('created_at', { ascending: true });
 
   if (error) {

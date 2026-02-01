@@ -68,17 +68,6 @@ export default function SettingsScreen() {
         <Text style={styles.title}>Settings</Text>
       </View>
 
-      <Text style={styles.sectionTitle}>Security</Text>
-      <Card style={styles.settingsGroup}>
-        <SettingRow
-          icon="people-outline"
-          label="Familiar Faces"
-          description="Manage known faces for recognition"
-          onPress={() => router.push('/(main)/familiar-faces')}
-          showArrow
-        />
-      </Card>
-
       <Text style={styles.sectionTitle}>Account</Text>
       <Card style={styles.profileCard}>
         <View style={styles.profileInfo}>
@@ -96,8 +85,16 @@ export default function SettingsScreen() {
         </View>
       </Card>
 
-      <Text style={styles.sectionTitle}>Safety</Text>
+      <Text style={styles.sectionTitle}>Security</Text>
       <Card style={styles.settingsGroup}>
+        <SettingRow
+          icon="people-outline"
+          label="Familiar Faces"
+          description="Manage known faces for recognition"
+          onPress={() => router.push('/(main)/familiar-faces')}
+          showArrow
+        />
+        <View style={styles.divider} />
         <SettingRow
           icon="people-outline"
           label="Emergency Contacts"

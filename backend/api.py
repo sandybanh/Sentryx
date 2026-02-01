@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 import face_recognition
@@ -10,6 +10,9 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
+# Detection files directory
+DETECTIONS_DIR = os.path.join(os.path.dirname(__file__), "detections")
 
 _supabase = None
 
@@ -268,6 +271,173 @@ def test_stream():
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# =============================================================================
+# ALERT LOGS API
+# =============================================================================
+
+@app.route("/api/alerts", methods=["GET"])
+def list_alerts():
+    """
+    List alert logs for a user with pagination.
+
+    Query params:
+    - user_id: required
+    - limit: optional (default 20, max 100)
+    - offset: optional (default 0)
+    - is_known: optional filter (true/false)
+    """
+    user_id = request.headers.get("X-User-Id") or request.args.get("user_id")
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+
+    limit = min(int(request.args.get("limit", 20)), 100)
+    offset = int(request.args.get("offset", 0))
+    is_known_filter = request.args.get("is_known")
+
+    try:
+        sb = get_supabase()
+        query = sb.table("alert_logs").select(
+            "id, device_id, identity, is_known, confidence, thumbnail_filename, "
+            "video_filename, gemini_assessment, threat_level, created_at"
+        ).eq("user_id", user_id).order("created_at", desc=True).range(offset, offset + limit - 1)
+
+        if is_known_filter is not None:
+            query = query.eq("is_known", is_known_filter.lower() == "true")
+
+        result = query.execute()
+
+        # Add full media URLs to each alert
+        backend_url = os.getenv("EXPO_PUBLIC_BACKEND_URL", request.host_url.rstrip('/'))
+        alerts = []
+        for alert in (result.data or []):
+            alert_with_urls = dict(alert)
+            if alert.get("thumbnail_filename"):
+                alert_with_urls["thumbnail_url"] = f"{backend_url}/api/alerts/media/{alert['thumbnail_filename']}"
+            if alert.get("video_filename"):
+                alert_with_urls["video_url"] = f"{backend_url}/api/alerts/media/{alert['video_filename']}"
+            alerts.append(alert_with_urls)
+
+        return jsonify({"alerts": alerts, "count": len(alerts)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/alerts/<alert_id>", methods=["GET"])
+def get_alert(alert_id):
+    """Get a single alert by ID"""
+    user_id = request.headers.get("X-User-Id") or request.args.get("user_id")
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+
+    try:
+        sb = get_supabase()
+        result = sb.table("alert_logs").select("*").eq("id", alert_id).eq("user_id", user_id).single().execute()
+
+        if not result.data:
+            return jsonify({"error": "Alert not found"}), 404
+
+        alert = dict(result.data)
+        backend_url = os.getenv("EXPO_PUBLIC_BACKEND_URL", request.host_url.rstrip('/'))
+
+        if alert.get("thumbnail_filename"):
+            alert["thumbnail_url"] = f"{backend_url}/api/alerts/media/{alert['thumbnail_filename']}"
+        if alert.get("video_filename"):
+            alert["video_url"] = f"{backend_url}/api/alerts/media/{alert['video_filename']}"
+
+        return jsonify({"alert": alert})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/alerts/<alert_id>", methods=["DELETE"])
+def delete_alert(alert_id):
+    """Delete an alert and optionally its media files"""
+    user_id = request.headers.get("X-User-Id") or request.args.get("user_id")
+    delete_files = request.args.get("delete_files", "true").lower() == "true"
+
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+
+    try:
+        sb = get_supabase()
+
+        # Get alert first to find media files
+        result = sb.table("alert_logs").select("thumbnail_filename, video_filename").eq("id", alert_id).eq("user_id", user_id).single().execute()
+
+        if not result.data:
+            return jsonify({"error": "Alert not found"}), 404
+
+        # Delete media files if requested
+        if delete_files:
+            if result.data.get("thumbnail_filename"):
+                thumbnail_path = os.path.join(DETECTIONS_DIR, result.data["thumbnail_filename"])
+                if os.path.exists(thumbnail_path):
+                    os.remove(thumbnail_path)
+            if result.data.get("video_filename"):
+                video_path = os.path.join(DETECTIONS_DIR, result.data["video_filename"])
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+
+        # Delete from database
+        sb.table("alert_logs").delete().eq("id", alert_id).eq("user_id", user_id).execute()
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/alerts/media/<filename>", methods=["GET"])
+def serve_alert_media(filename):
+    """
+    Serve alert media files (images and videos).
+    Supports byte-range requests for video streaming.
+    """
+    # Security: prevent directory traversal
+    if ".." in filename or "/" in filename or "\\" in filename:
+        return jsonify({"error": "Invalid filename"}), 400
+
+    file_path = os.path.join(DETECTIONS_DIR, filename)
+
+    if not os.path.exists(file_path):
+        return jsonify({"error": "File not found"}), 404
+
+    # Determine MIME type
+    if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
+        mimetype = 'image/jpeg'
+    elif filename.lower().endswith('.png'):
+        mimetype = 'image/png'
+    elif filename.lower().endswith('.mp4'):
+        mimetype = 'video/mp4'
+    else:
+        mimetype = 'application/octet-stream'
+
+    return send_from_directory(DETECTIONS_DIR, filename, mimetype=mimetype)
+
+
+@app.route("/api/alerts/stats", methods=["GET"])
+def get_alert_stats():
+    """Get alert statistics for a user"""
+    user_id = request.headers.get("X-User-Id") or request.args.get("user_id")
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+
+    try:
+        sb = get_supabase()
+
+        # Get counts
+        total_result = sb.table("alert_logs").select("id", count="exact").eq("user_id", user_id).execute()
+        unknown_result = sb.table("alert_logs").select("id", count="exact").eq("user_id", user_id).eq("is_known", False).execute()
+        high_threat_result = sb.table("alert_logs").select("id", count="exact").eq("user_id", user_id).eq("threat_level", "HIGH").execute()
+
+        return jsonify({
+            "total_alerts": total_result.count or 0,
+            "unknown_alerts": unknown_result.count or 0,
+            "high_threat_alerts": high_threat_result.count or 0
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ export default function Index() {
   }
 
   if (user) {
-    return <Redirect href="/(main)/camera" />;
+    return <Redirect href="/(main)/home" />;
   }
 
   return <Redirect href="/(auth)/welcome" />;

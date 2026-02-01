@@ -35,7 +35,7 @@ function useProtectedRoute() {
     if (!user && !inAuthGroup) {
       router.replace('/(auth)/welcome');
     } else if (user && inAuthGroup) {
-      router.replace('/(main)/camera');
+      router.replace('/(main)/home');
     }
   }, [user, isInitialized, segments]);
 }
@@ -53,7 +53,7 @@ function useNotificationHandler() {
       console.log('Notification tapped:', data);
 
       if (data?.screen === 'camera') {
-        router.push('/(main)/camera');
+        router.push('/(main)/home');
       }
     });
 
@@ -61,7 +61,7 @@ function useNotificationHandler() {
       if (response) {
         const data = response.notification.request.content.data;
         if (data?.screen === 'camera') {
-          router.push('/(main)/camera');
+          router.push('/(main)/home');
         }
       }
     });

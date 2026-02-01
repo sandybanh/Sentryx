@@ -167,3 +167,74 @@ export async function notifyMotionEvent(eventId: string, deviceId: string) {
     1
   );
 }
+
+// Alert notification with Gemini assessment and optional thumbnail
+export interface AlertNotificationData {
+  alertId: string;
+  identity: string;
+  isKnown: boolean;
+  geminiAssessment?: string | null;
+  threatLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | null;
+  thumbnailUrl?: string | null;
+  deviceId: string;
+}
+
+const alertNotificationCache = new Set<string>();
+
+export async function notifyAlertEvent(data: AlertNotificationData) {
+  if (alertNotificationCache.has(data.alertId)) {
+    return;
+  }
+  alertNotificationCache.add(data.alertId);
+
+  // Build notification title based on threat level
+  let title = 'Security Alert';
+  if (data.threatLevel === 'HIGH') {
+    title = 'HIGH THREAT ALERT';
+  } else if (data.threatLevel === 'MEDIUM') {
+    title = 'Security Warning';
+  } else if (data.isKnown) {
+    title = 'Person Detected';
+  }
+
+  // Build notification body from Gemini assessment or default message
+  let body: string;
+  if (data.geminiAssessment) {
+    // Truncate long assessments for notification
+    body = data.geminiAssessment.length > 150
+      ? data.geminiAssessment.substring(0, 147) + '...'
+      : data.geminiAssessment;
+  } else if (data.isKnown) {
+    body = `${data.identity} detected on ${data.deviceId}`;
+  } else {
+    body = `Unknown person detected on ${data.deviceId}. Tap to view recording.`;
+  }
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      data: {
+        screen: 'alert-history',
+        type: 'intruder_alert',
+        alert_id: data.alertId,
+        device_id: data.deviceId,
+      },
+      sound: true,
+      priority: data.threatLevel === 'HIGH'
+        ? Notifications.AndroidNotificationPriority.MAX
+        : Notifications.AndroidNotificationPriority.HIGH,
+      categoryIdentifier: 'alerts',
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: 1,
+    },
+  });
+}
+
+// Clear notification caches (useful for testing)
+export function clearNotificationCaches() {
+  motionNotificationCache.clear();
+  alertNotificationCache.clear();
+}

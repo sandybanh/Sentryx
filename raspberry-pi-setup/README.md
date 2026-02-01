@@ -264,6 +264,29 @@ For low-latency streaming to the GirlCar app, use MediaMTX + WebRTC:
 
 **Prerequisites:** MediaMTX and mediamtx.yml must be in your home directory. Run `~/start-stream.sh` manually first to verify FFmpeg works.
 
+### Quality tuning (MediaMTX + WebRTC)
+You can increase stream quality without editing the script by setting env vars:
+
+```bash
+export VIDEO_SIZE=1280x720
+export VIDEO_FPS=30
+export VIDEO_BITRATE=2500k
+export VIDEO_MAXRATE=3000k
+export VIDEO_BUFSIZE=6000k
+export VIDEO_CRF=22
+```
+
+Higher quality example (more bandwidth/CPU):
+
+```bash
+export VIDEO_SIZE=1920x1080
+export VIDEO_FPS=30
+export VIDEO_BITRATE=4500k
+export VIDEO_MAXRATE=5000k
+export VIDEO_BUFSIZE=10000k
+export VIDEO_CRF=20
+```
+
 ---
 
 ## Quick Reference

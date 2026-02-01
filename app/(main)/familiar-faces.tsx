@@ -12,6 +12,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -29,6 +30,7 @@ export default function FamiliarFacesScreen() {
   const router = useRouter();
   const [faces, setFaces] = useState<FamiliarFace[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [pendingUri, setPendingUri] = useState<string | null>(null);
@@ -36,8 +38,9 @@ export default function FamiliarFacesScreen() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const data = await fetchFamiliarFaces();
+    const { data, error } = await fetchFamiliarFaces();
     setFaces(data);
+    setLoadError(data.length ? null : error);
     setLoading(false);
   }, []);
 
@@ -166,6 +169,14 @@ export default function FamiliarFacesScreen() {
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.primary[500]} />
         </View>
+      ) : loadError ? (
+        <View style={styles.centered}>
+          <Ionicons name="alert-circle" size={48} color={Colors.error} />
+          <Text style={styles.emptyText}>{loadError}</Text>
+          <Text style={styles.emptyHint}>
+            Check that the backend is running and EXPO_PUBLIC_BACKEND_URL is set.
+          </Text>
+        </View>
       ) : faces.length === 0 ? (
         <View style={styles.centered}>
           <Ionicons name="people-outline" size={64} color={Colors.neutral[300]} />
@@ -180,9 +191,13 @@ export default function FamiliarFacesScreen() {
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
             <Card style={styles.faceCard} variant="filled">
-              <View style={styles.faceIcon}>
-                <Ionicons name="person" size={24} color={Colors.primary[500]} />
-              </View>
+              {item.image_uri ? (
+                <Image source={{ uri: item.image_uri }} style={styles.faceThumbnail} />
+              ) : (
+                <View style={styles.faceIcon}>
+                  <Ionicons name="person" size={24} color={Colors.primary[500]} />
+                </View>
+              )}
               <Text style={styles.faceName}>{item.name}</Text>
               <TouchableOpacity
                 onPress={() => handleDelete(item)}
@@ -295,6 +310,12 @@ const styles = StyleSheet.create({
     color: Colors.neutral[0],
     flex: 1,
   },
+  faceThumbnail: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    marginRight: Spacing.md,
+  },
   deleteBtn: {
     padding: Spacing.sm,
   },
@@ -307,6 +328,12 @@ const styles = StyleSheet.create({
   emptyText: {
     ...Typography.sizes.sm,
     color: Colors.neutral[100],
+  },
+  emptyHint: {
+    ...Typography.sizes.xs,
+    color: Colors.neutral[300],
+    marginTop: Spacing.sm,
+    textAlign: 'center',
   },
   modalOverlay: {
     flex: 1,

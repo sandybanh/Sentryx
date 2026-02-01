@@ -38,12 +38,12 @@ export default function MainLayout() {
         }}
       />
       <Tabs.Screen
-        name="camera"
+        name="alert-history"
         options={{
-          title: 'Live Feed',
+          title: 'History',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? 'videocam' : 'videocam-outline'}
+              name={focused ? 'notifications' : 'notifications-outline'}
               size={24}
               color={color}
             />
@@ -65,6 +65,12 @@ export default function MainLayout() {
       />
       <Tabs.Screen
         name="emergency-contacts"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="familiar-faces"
         options={{
           href: null,
         }}

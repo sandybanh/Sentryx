@@ -1,72 +1,58 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
-
-const BACKEND_URL =
-  process.env.EXPO_PUBLIC_BACKEND_URL ?? 'http://localhost:5000';
+const LOCAL_FACES_KEY = 'demo_familiar_faces_v1';
 
 export interface FamiliarFace {
   id: string;
   name: string;
   created_at: string;
+  image_uri?: string;
 }
 
-export async function fetchFamiliarFaces(): Promise<FamiliarFace[]> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
-
+async function loadLocalFaces(): Promise<FamiliarFace[]> {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/faces?user_id=${user.id}`);
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.faces ?? [];
+    const raw = await AsyncStorage.getItem(LOCAL_FACES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
+}
+
+async function saveLocalFaces(faces: FamiliarFace[]) {
+  try {
+    await AsyncStorage.setItem(LOCAL_FACES_KEY, JSON.stringify(faces));
+  } catch {
+    // Ignore local storage failures for demo mode
+  }
+}
+
+export async function fetchFamiliarFaces(): Promise<{
+  data: FamiliarFace[];
+  error: string | null;
+}> {
+  const local = await loadLocalFaces();
+  return { data: local, error: null };
 }
 
 export async function addFamiliarFace(
   name: string,
   imageUri: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: 'Not authenticated' };
-
-  try {
-    const formData = new FormData();
-    formData.append('image', {
-      uri: imageUri,
-      name: 'face.jpg',
-      type: 'image/jpeg',
-    } as any);
-    formData.append('user_id', user.id);
-    formData.append('name', name);
-
-    const res = await fetch(`${BACKEND_URL}/api/faces`, {
-      method: 'POST',
-      headers: { 'X-User-Id': user.id },
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      return { ok: false, error: err.error ?? 'Failed to add face' };
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e) };
-  }
+  const local = await loadLocalFaces();
+  const newFace: FamiliarFace = {
+    id: `local-${Date.now()}`,
+    name,
+    created_at: new Date().toISOString(),
+    image_uri: imageUri,
+  };
+  await saveLocalFaces([newFace, ...local]);
+  return { ok: true };
 }
 
 export async function deleteFamiliarFace(id: string): Promise<boolean> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
-
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/faces/${id}?user_id=${user.id}`, {
-      method: 'DELETE',
-      headers: { 'X-User-Id': user.id },
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+  const local = await loadLocalFaces();
+  await saveLocalFaces(local.filter((face) => face.id !== id));
+  return true;
 }

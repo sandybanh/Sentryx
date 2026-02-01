@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,12 +11,11 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Contacts from 'expo-contacts';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button, Card } from '@/components/ui';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { getEmergencyContacts, replaceEmergencyContacts } from '@/lib/emergency';
 
 type ContactItem = {
@@ -29,40 +28,35 @@ export default function EmergencyContactsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [isLoading, setIsLoading] = useState(true);
-  const [permissionDenied, setPermissionDenied] = useState(false);
   const [contacts, setContacts] = useState<ContactItem[]>([]);
   const [selected, setSelected] = useState<ContactItem[]>([]);
   const [search, setSearch] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const sortByName = useCallback((items: ContactItem[]) => {
+    return [...items].sort((a, b) => a.name.localeCompare(b.name));
+  }, []);
+
   useEffect(() => {
     const load = async () => {
       setIsLoading(true);
-      const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== 'granted') {
-        setPermissionDenied(true);
-        setIsLoading(false);
-        return;
-      }
+      const demoContacts: ContactItem[] = [
+        { id: 'demo-1', name: 'Aaliyah Williams', phone: '(416) 555-0132' },
+        { id: 'demo-2', name: 'Brooke Chen', phone: '(416) 555-0178' },
+        { id: 'demo-3', name: 'Carla Johnson', phone: '(416) 555-0129' },
+        { id: 'demo-4', name: 'Daria Singh', phone: '(416) 555-0144' },
+        { id: 'demo-5', name: 'Elena Park', phone: '(416) 555-0191' },
+        { id: 'demo-6', name: 'Fatima Noor', phone: '(416) 555-0156' },
+        { id: 'demo-7', name: 'Grace Alvarez', phone: '(416) 555-0117' },
+        { id: 'demo-8', name: 'Hana Kim', phone: '(416) 555-0183' },
+        { id: 'demo-9', name: 'Isabelle Martin', phone: '(416) 555-0162' },
+        { id: 'demo-10', name: 'Jade Patel', phone: '(416) 555-0108' },
+        { id: 'demo-11', name: 'Kylie Brown', phone: '(416) 555-0139' },
+        { id: 'demo-12', name: 'Layla Brooks', phone: '(416) 555-0170' },
+      ];
 
-      const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.PhoneNumbers],
-        pageSize: 400,
-        pageOffset: 0,
-      });
-
-      const normalized = data
-        .filter((contact) => contact.phoneNumbers?.length)
-        .map((contact) => ({
-          id: contact.id,
-          name: contact.name ?? 'Unknown',
-          phone: contact.phoneNumbers?.[0]?.number ?? '',
-        }))
-        .filter((contact) => contact.phone.trim().length > 0)
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-      setContacts(normalized);
+      setContacts(sortByName(demoContacts));
 
       const existing = await getEmergencyContacts();
       const existingContacts = existing.map((item) => ({
@@ -70,12 +64,12 @@ export default function EmergencyContactsScreen() {
         name: item.name,
         phone: item.phone,
       }));
-      setSelected(existingContacts);
+      setSelected(sortByName(existingContacts));
       setIsLoading(false);
     };
 
     load();
-  }, []);
+  }, [sortByName]);
 
   const filteredContacts = useMemo(() => {
     if (!search.trim()) return contacts;
@@ -90,7 +84,7 @@ export default function EmergencyContactsScreen() {
   const handleAddContact = (contact: ContactItem) => {
     const exists = selected.some((item) => item.phone === contact.phone);
     if (exists) return;
-    setSelected((prev) => [...prev, contact]);
+    setSelected((prev) => sortByName([...prev, contact]));
   };
 
   const handleRemoveContact = (contact: ContactItem) => {
@@ -128,23 +122,6 @@ export default function EmergencyContactsScreen() {
     );
   }
 
-  if (permissionDenied) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color={Colors.neutral[0]} />
-        </TouchableOpacity>
-        <View style={styles.emptyState}>
-          <Ionicons name="alert-circle" size={36} color={Colors.primary[500]} />
-          <Text style={styles.emptyTitle}>Contacts permission needed</Text>
-          <Text style={styles.emptySubtitle}>
-            Enable contacts access to choose your emergency contacts.
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -163,6 +140,7 @@ export default function EmergencyContactsScreen() {
       <Text style={styles.subtitle}>Add at least 2 contacts. You can add more.</Text>
 
       <ScrollView
+        style={styles.listScroll}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
       >
@@ -200,27 +178,36 @@ export default function EmergencyContactsScreen() {
         />
       </View>
 
-      <Modal visible={pickerOpen} animationType="slide" transparent>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add contacts</Text>
-              <TouchableOpacity onPress={() => setPickerOpen(false)}>
-                <Ionicons name="close" size={22} color={Colors.neutral[0]} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.searchRow}>
-              <Ionicons name="search" size={18} color={Colors.neutral[300]} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search contacts"
-                placeholderTextColor={Colors.neutral[300]}
-                value={search}
-                onChangeText={setSearch}
-              />
-            </View>
-            <ScrollView contentContainerStyle={styles.modalList}>
-              {filteredContacts.map((contact) => {
+      <Modal visible={pickerOpen} animationType="slide">
+        <View style={[styles.modalFullscreen, { paddingTop: insets.top + Spacing.lg }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Add contacts</Text>
+            <TouchableOpacity
+              onPress={() => setPickerOpen(false)}
+              style={styles.modalCloseButton}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Close"
+            >
+              <Ionicons name="close" size={22} color={Colors.neutral[0]} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.searchRow}>
+            <Ionicons name="search" size={18} color={Colors.neutral[300]} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search contacts"
+              placeholderTextColor={Colors.neutral[300]}
+              value={search}
+              onChangeText={setSearch}
+            />
+          </View>
+          <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalList}>
+            {filteredContacts.length === 0 ? (
+              <View style={styles.modalEmpty}>
+                <Text style={styles.modalEmptyText}>No contacts found</Text>
+              </View>
+            ) : (
+              filteredContacts.map((contact) => {
                 const alreadyAdded = selected.some((item) => item.phone === contact.phone);
                 return (
                   <TouchableOpacity
@@ -243,9 +230,9 @@ export default function EmergencyContactsScreen() {
                     />
                   </TouchableOpacity>
                 );
-              })}
-            </ScrollView>
-          </View>
+              })
+            )}
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -281,6 +268,10 @@ const styles = StyleSheet.create({
     ...Typography.sizes.sm,
     color: Colors.neutral[100],
     marginTop: Spacing.sm,
+  },
+  listScroll: {
+    flex: 1,
+    marginTop: Spacing.md,
   },
   addButton: {
     width: 40,
@@ -346,35 +337,10 @@ const styles = StyleSheet.create({
     ...Typography.sizes.sm,
     color: Colors.neutral[100],
   },
-  emptyState: {
+  modalFullscreen: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  emptyTitle: {
-    ...Typography.sizes.lg,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.neutral[0],
-  },
-  emptySubtitle: {
-    ...Typography.sizes.sm,
-    color: Colors.neutral[100],
-    textAlign: 'center',
-    paddingHorizontal: Spacing.lg,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
     backgroundColor: Colors.background.secondary,
     padding: Spacing.lg,
-    borderTopLeftRadius: BorderRadius.xl,
-    borderTopRightRadius: BorderRadius.xl,
-    maxHeight: '80%',
-    ...Shadows.lg,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -386,6 +352,17 @@ const styles = StyleSheet.create({
     ...Typography.sizes.lg,
     fontWeight: Typography.weights.semibold,
     color: Colors.neutral[0],
+  },
+  modalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.background.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalScroll: {
+    flex: 1,
   },
   searchRow: {
     flexDirection: 'row',
@@ -404,6 +381,14 @@ const styles = StyleSheet.create({
   },
   modalList: {
     gap: Spacing.md,
+  },
+  modalEmpty: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xl,
+  },
+  modalEmptyText: {
+    ...Typography.sizes.sm,
+    color: Colors.neutral[200],
   },
   modalItem: {
     flexDirection: 'row',

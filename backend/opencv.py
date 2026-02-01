@@ -387,6 +387,7 @@ class FastSecuritySystem:
         self.frame_count = 0
         self.use_mediapipe = config.get('use_mediapipe', True)
         self.use_yolo = config.get('use_yolo', False)
+        self.detection_scale = config.get('detection_scale', 1.0)
         
         print("Loading face database...")
         user_id = config.get("user_id") or os.getenv("SUPABASE_USER_ID")
@@ -429,7 +430,9 @@ class FastSecuritySystem:
         self.recording = False
         self.recording_start = None
         self.video_writer = None
-        self.recording_duration = 60 # Set the recording duration to 30-60 seconds
+        self.recording_duration = 15  # Shorter recordings for faster uploads
+        self.capture_fps = config.get('target_fps', 30)
+        self.recording_size = None
         
         self.stats = {
             'total_detections': 0,
@@ -457,11 +460,22 @@ class FastSecuritySystem:
         detected_persons = []
         
         # Use MediaPipe for face detection (MUCH faster)
+        frame_for_detection = frame
+        scale_x = 1.0
+        scale_y = 1.0
+        if self.detection_scale and self.detection_scale < 1.0:
+            height, width = frame.shape[:2]
+            scaled_w = max(1, int(width * self.detection_scale))
+            scaled_h = max(1, int(height * self.detection_scale))
+            frame_for_detection = cv2.resize(frame, (scaled_w, scaled_h))
+            scale_x = width / scaled_w
+            scale_y = height / scaled_h
+
         if self.use_mediapipe:
-            face_bboxes = self.mediapipe_detector.detect_faces(frame)
+            face_bboxes = self.mediapipe_detector.detect_faces(frame_for_detection)
         elif self.use_yolo:
             # Fallback to YOLO
-            results = self.yolo(frame, conf=self.yolo_confidence, verbose=False)
+            results = self.yolo(frame_for_detection, conf=self.yolo_confidence, verbose=False)
             face_bboxes = []
             
             for r in results:
@@ -477,6 +491,11 @@ class FastSecuritySystem:
         # Process each detected face
         for bbox in face_bboxes:
             x1, y1, x2, y2 = map(int, bbox)
+            if scale_x != 1.0 or scale_y != 1.0:
+                x1 = int(x1 * scale_x)
+                x2 = int(x2 * scale_x)
+                y1 = int(y1 * scale_y)
+                y2 = int(y2 * scale_y)
             
             # Extract face region (expand slightly for better encoding)
             height = y2 - y1
@@ -570,52 +589,304 @@ class FastSecuritySystem:
         return frame
     
     def trigger_alert(self, person, frame_clean):
-            """Alert trigger with AI assessment - saves image + 15s video"""
+            """Alert trigger with AI assessment - saves image + video and logs to Supabase"""
             identity = person['identity']
-            
+
             if not self.cooldown.can_alert(identity):
                 return False
-            
+
             if not self.recording:
                 # Readable timestamp for display
                 readable_time = datetime.now().strftime("%I:%M:%S %p")
                 # Filename-safe timestamp
                 file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                
-                # Save clean snapshot image (no boxes)
-                image_filename = f"{self.save_dir}/ALERT_{identity}_{file_timestamp}.jpg"
-                cv2.imwrite(image_filename, frame_clean)
-                
-                # Start video recording
-                video_filename = f"{self.save_dir}/ALERT_{identity}_{file_timestamp}.mp4"
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                fps = 12
+
+                # Generate filenames (just the filename, not full path for DB storage)
+                thumbnail_filename = f"ALERT_{identity}_{file_timestamp}.jpg"
+                video_filename = f"ALERT_{identity}_{file_timestamp}.mp4"
+
+                # Full paths for saving files
+                image_path = f"{self.save_dir}/{thumbnail_filename}"
+                video_path = f"{self.save_dir}/{video_filename}"
+
+                # Save clean snapshot image with high quality
+                cv2.imwrite(image_path, frame_clean, [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+                # Start video recording - favor quality for playback
                 height, width = frame_clean.shape[:2]
-                self.video_writer = cv2.VideoWriter(video_filename, fourcc, fps, (width, height))
-                
+                fps = self.config.get('recording_fps') or self.capture_fps or self.config.get('target_fps', 30)
+
+                # Prefer higher-quality codecs, fall back for compatibility
+                fourcc_candidates = ['avc1', 'H264', 'X264', 'mp4v']
+                self.video_writer = None
+                for fourcc_name in fourcc_candidates:
+                    fourcc = cv2.VideoWriter_fourcc(*fourcc_name)
+                    writer = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
+                    if writer.isOpened():
+                        self.video_writer = writer
+                        break
+
+                if self.video_writer is None:
+                    print("  Warning: VideoWriter failed to open; skipping recording")
+                    return False
+
+                # Try to boost encoder quality if supported
+                try:
+                    self.video_writer.set(cv2.VIDEOWRITER_PROP_QUALITY, 95)
+                except Exception:
+                    pass
+
                 self.recording = True
                 self.recording_start = time.time()
+                self.recording_size = (width, height)
+                self.current_video_path = video_path
+                self.current_image_path = image_path
+                self.current_thumbnail_filename = thumbnail_filename
+                self.current_video_filename = video_filename
+                self.current_person = person
                 self.stats['alerts_sent'] += 1
-                
-                print(f"ALERT: {identity} @ {readable_time}") 
-                print(f"  Image: {image_filename}")
-                print(f"  Video: {video_filename} (15s)")
-                
-                # Start AI assessment in background (non-blocking)
-                threading.Thread(target=self._assess_threat_async, args=(person,), daemon=True).start()
-                
+
+                print(f"ALERT: {identity} @ {readable_time}")
+                print(f"  Image: {image_path}")
+                print(f"  Video: {video_path} ({self.recording_duration}s)")
+
+                # Create alert log entry in Supabase immediately (URLs will be added async)
+                alert_id = self._save_alert_to_db(person, thumbnail_filename, video_filename)
+                self.current_alert_id = alert_id
+
+                # Upload thumbnail and run AI assessment in background (non-blocking)
+                threading.Thread(
+                    target=self._process_alert_async,
+                    args=(person, alert_id, image_path, thumbnail_filename),
+                    daemon=True
+                ).start()
+
                 return True
-            
+
             return False
-    
-    def _assess_threat_async(self, person):
-        """Run AI assessment in background thread to avoid freezing"""
+
+    def _process_alert_async(self, person, alert_id, image_path, thumbnail_filename):
+        """Process alert in background: upload thumbnail and run AI assessment"""
+        # Upload thumbnail to Supabase Storage
+        thumbnail_url = self._upload_to_storage(image_path, thumbnail_filename, 'image/jpeg')
+
+        # Update alert with thumbnail URL
+        if thumbnail_url and alert_id:
+            sb = _get_supabase()
+            if sb:
+                try:
+                    sb.table("alert_logs").update({
+                        "thumbnail_url": thumbnail_url
+                    }).eq("id", alert_id).execute()
+                    print(f"  Updated alert {alert_id} with thumbnail URL")
+                except Exception as e:
+                    print(f"  Warning: Failed to update thumbnail URL: {e}")
+
+        # Run AI assessment
         ai_assessment = self.gemini.assess_threat(person)
         print(f"  AI Assessment: {ai_assessment}")
+
+        # Parse threat level from assessment
+        threat_level = None
+        if ai_assessment:
+            if "THREAT: HIGH" in ai_assessment.upper():
+                threat_level = "HIGH"
+            elif "THREAT: MEDIUM" in ai_assessment.upper():
+                threat_level = "MEDIUM"
+            elif "THREAT: LOW" in ai_assessment.upper():
+                threat_level = "LOW"
+
+        # Update the alert log with gemini assessment
+        if alert_id:
+            sb = _get_supabase()
+            if sb:
+                try:
+                    sb.table("alert_logs").update({
+                        "gemini_assessment": ai_assessment,
+                        "threat_level": threat_level
+                    }).eq("id", alert_id).execute()
+                    print(f"  Updated alert {alert_id} with AI assessment")
+                except Exception as e:
+                    print(f"  Warning: Failed to update alert with assessment: {e}")
+
+        # Send SMS/push notification
+        self._send_notification(person, ai_assessment, thumbnail_filename)
+
+    def _upload_to_storage(self, file_path, filename, content_type):
+        """Upload file to Supabase Storage and return public URL"""
+        sb = _get_supabase()
+        if not sb:
+            return None
+
+        try:
+            with open(file_path, 'rb') as f:
+                file_data = f.read()
+
+            # Upload to 'alerts' bucket
+            result = sb.storage.from_('alerts').upload(
+                filename,
+                file_data,
+                file_options={"content-type": content_type, "upsert": "true"}
+            )
+
+            # Get public URL
+            public_url = sb.storage.from_('alerts').get_public_url(filename)
+            print(f"  Uploaded to storage: {public_url}")
+            return public_url
+
+        except Exception as e:
+            print(f"  Warning: Failed to upload to storage: {e}")
+            # Try to create bucket if it doesn't exist
+            try:
+                sb.storage.create_bucket('alerts', options={"public": True})
+                print("  Created 'alerts' storage bucket")
+                # Retry upload
+                with open(file_path, 'rb') as f:
+                    file_data = f.read()
+                sb.storage.from_('alerts').upload(
+                    filename,
+                    file_data,
+                    file_options={"content-type": content_type, "upsert": "true"}
+                )
+                public_url = sb.storage.from_('alerts').get_public_url(filename)
+                return public_url
+            except Exception as e2:
+                print(f"  Warning: Bucket creation/retry failed: {e2}")
+            return None
+
+    def _save_alert_to_db(self, person, thumbnail_filename, video_filename, thumbnail_url=None, video_url=None):
+        """Save alert metadata to Supabase alert_logs table"""
+        sb = _get_supabase()
+        if not sb:
+            print("  Warning: Could not save alert to database (no Supabase connection)")
+            return None
+
+        user_id = self.config.get("user_id") or os.getenv("SUPABASE_USER_ID")
+        if not user_id:
+            print("  Warning: No user_id configured, skipping database save")
+            return None
+
+        try:
+            data = {
+                "user_id": user_id,
+                "device_id": self.device_id,
+                "identity": person['identity'],
+                "is_known": person['is_known'],
+                "confidence": person.get('confidence', 0),
+                "thumbnail_filename": thumbnail_filename,
+                "video_filename": video_filename,
+            }
+            # Add URLs if available
+            if thumbnail_url:
+                data["thumbnail_url"] = thumbnail_url
+            if video_url:
+                data["video_url"] = video_url
+
+            result = sb.table("alert_logs").insert(data).execute()
+
+            if result.data and len(result.data) > 0:
+                alert_id = result.data[0].get('id')
+                print(f"  Alert logged to database: {alert_id}")
+                return alert_id
+        except Exception as e:
+            print(f"  Warning: Failed to save alert to database: {e}")
+
+        return None
+
+
+    def _upload_video_async(self, video_path, video_filename, alert_id):
+        """Upload video to Supabase Storage and update the alert record"""
+        video_url = self._upload_to_storage(video_path, video_filename, 'video/mp4')
+
+        if video_url and alert_id:
+            sb = _get_supabase()
+            if sb:
+                try:
+                    sb.table("alert_logs").update({
+                        "video_url": video_url
+                    }).eq("id", alert_id).execute()
+                    print(f"  Updated alert {alert_id} with video URL")
+                except Exception as e:
+                    print(f"  Warning: Failed to update alert with video URL: {e}")
     
+    def _send_notification(self, person, gemini_assessment, thumbnail_filename):
+        """Send SMS and push notification with gemini assessment"""
+        identity = person['identity']
+        is_known = person['is_known']
+
+        # Build notification message from gemini assessment
+        if gemini_assessment:
+            message = gemini_assessment
+        else:
+            if is_known:
+                message = f"Known person detected: {identity}"
+            else:
+                message = f"ALERT: Unknown person detected near your vehicle"
+
+        # Build thumbnail URL for notifications
+        backend_url = os.getenv("EXPO_PUBLIC_BACKEND_URL", "http://localhost:5000")
+        thumbnail_url = f"{backend_url}/api/alerts/media/{thumbnail_filename}" if thumbnail_filename else None
+
+        # Send to notification service (SMS via Twilio + push via Supabase Edge Function)
+        self._trigger_notification_service(message, thumbnail_url, person)
+
+    def _trigger_notification_service(self, message, thumbnail_url, person):
+        """Trigger the notification service to send SMS and push notifications"""
+        sb = _get_supabase()
+        if not sb:
+            return
+
+        user_id = self.config.get("user_id") or os.getenv("SUPABASE_USER_ID")
+        if not user_id:
+            return
+
+        try:
+            # Get emergency contacts for the user
+            contacts_result = sb.table("emergency_contacts").select("phone").eq("user_id", user_id).execute()
+
+            if not contacts_result.data or len(contacts_result.data) == 0:
+                print("  No emergency contacts configured, skipping SMS")
+                return
+
+            # Send SMS to each contact via Twilio
+            from twilio.rest import Client
+            account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+            auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+            from_number = os.getenv("TWILIO_FROM_NUMBER")
+
+            if not all([account_sid, auth_token, from_number]):
+                print("  Twilio credentials not configured, skipping SMS")
+                return
+
+            client = Client(account_sid, auth_token)
+
+            # Truncate message for SMS (160 char limit, leave room for URL)
+            sms_message = message[:120] if len(message) > 120 else message
+
+            for contact in contacts_result.data:
+                phone = contact.get("phone")
+                if phone:
+                    try:
+                        # Include thumbnail URL in SMS if available
+                        full_message = sms_message
+                        if thumbnail_url:
+                            full_message += f"\n\nView: {thumbnail_url}"
+
+                        client.messages.create(
+                            body=full_message,
+                            from_=from_number,
+                            to=phone
+                        )
+                        print(f"  SMS sent to {phone}")
+                    except Exception as e:
+                        print(f"  Failed to send SMS to {phone}: {e}")
+
+        except Exception as e:
+            print(f"  Notification service error: {e}")
+
     def send_sms_alert(self, image_path, person):
         pass
-    
+
     def send_esp32_alert(self, tracking_data):
         pass
 
@@ -776,9 +1047,12 @@ def main():
         'yolo_confidence': 0.6,
         'cooldown_seconds': 60,
         'stream_url': stream_url,
-        'frame_width': 640,
-        'frame_height': 480,
-        'process_every_n_frames': 2,  # Process every 2nd frame = 2x speed
+        'frame_width': int(os.getenv("VIDEO_FRAME_WIDTH", 1280)),  # Higher resolution for better quality
+        'frame_height': int(os.getenv("VIDEO_FRAME_HEIGHT", 720)),
+        'target_fps': int(os.getenv("VIDEO_TARGET_FPS", 30)),
+        'recording_fps': int(os.getenv("VIDEO_RECORDING_FPS", 30)),
+        'process_every_n_frames': 1,  # Process every frame for smoother output
+        'detection_scale': float(os.getenv("VIDEO_DETECTION_SCALE", 0.75)),
         'use_mediapipe': True,  # MediaPipe = 10x faster than CNN
         'use_yolo': False,  # Disable YOLO, MediaPipe is faster
     }
@@ -799,7 +1073,20 @@ def main():
     if cap.isOpened():
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, config['frame_width'])
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config['frame_height'])
+        cap.set(cv2.CAP_PROP_FPS, config.get('target_fps', 30))
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce latency
+        capture_fps = cap.get(cv2.CAP_PROP_FPS)
+        if not capture_fps or capture_fps < 5 or capture_fps > 120:
+            capture_fps = config.get('target_fps', 30)
+        system.capture_fps = capture_fps
+
+        actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or config['frame_width']
+        actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or config['frame_height']
+        system.tracker.frame_width = actual_w
+        system.tracker.frame_height = actual_h
+        system.config['frame_width'] = actual_w
+        system.config['frame_height'] = actual_h
 
     if not cap.isOpened():
         print("Cannot open video stream")
@@ -840,25 +1127,39 @@ def main():
             # Draw detections
             frame = system.draw_detections(frame, persons)
             
-            # Handle video recording (WITH boxes)
+            # Handle video recording (clean frames for higher quality)
             if system.recording:
-                system.video_writer.write(frame)
+                frame_to_write = frame_clean
+                if system.recording_size:
+                    target_w, target_h = system.recording_size
+                    if frame.shape[1] != target_w or frame.shape[0] != target_h:
+                        frame_to_write = cv2.resize(frame_to_write, (target_w, target_h))
+                system.video_writer.write(frame_to_write)
                 if time.time() - system.recording_start > system.recording_duration:
                     system.video_writer.release()
                     system.recording = False
                     system.video_writer = None
                     print("Video recording stopped")
+
+                    # Upload video to Supabase Storage in background
+                    if hasattr(system, 'current_video_path') and hasattr(system, 'current_alert_id'):
+                        threading.Thread(
+                            target=system._upload_video_async,
+                            args=(system.current_video_path, system.current_video_filename, system.current_alert_id),
+                            daemon=True
+                        ).start()
             
             motion_detected = system.motion_detector.detect(frame)
             if motion_detected and system._motion_alert_cooldown.can_alert("motion"):
                 send_camera_alert(system.device_id, motion=True, alert_type=None)
 
             for person in persons:
-                if not person['is_known']:
-                    if system.trigger_alert(person, frame_clean):
-                        send_camera_alert(
-                            system.device_id, motion=True, alert_type="unknown_face"
-                        )
+                # Trigger alert for ALL detected persons (known and unknown)
+                alert_type = "known_face" if person['is_known'] else "unknown_face"
+                if system.trigger_alert(person, frame_clean):
+                    send_camera_alert(
+                        system.device_id, motion=True, alert_type=alert_type
+                    )
             
             # FPS calculation
             fps_counter += 1
