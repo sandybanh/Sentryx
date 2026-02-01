@@ -13,8 +13,8 @@ serve(async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  const secret = req.headers.get("x-device-secret");
-  if (!secret || secret !== DEVICE_SECRET) {
+  const secret = req.headers.get("x-device-secret") ?? "";
+  if (!DEVICE_SECRET || secret !== DEVICE_SECRET) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -25,28 +25,22 @@ serve(async (req) => {
     return new Response("Bad JSON", { status: 400 });
   }
 
-  const { device_id, motion, ultra_close, distance_cm } = body;
+  const device_id = String(body.device_id ?? "unknown");
+  const motionFlag = body.motion ? true : false;
+  const ultraCloseFlag = body.ultra_close ? true : false;
 
-  if (typeof device_id !== "string") {
-    return new Response("device_id must be string", { status: 400 });
+  const { error } = await supabase
+    .from("sensor_events")
+    .insert([{ device_id, motion: motionFlag, ultra_close: ultraCloseFlag }]);
+
+  if (error) {
+    return new Response(JSON.stringify({ ok: false, error: error.message }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
-  if (typeof motion !== "boolean") {
-    return new Response("motion must be boolean", { status: 400 });
-  }
-  if (typeof ultra_close !== "boolean") {
-    return new Response("ultra_close must be boolean", { status: 400 });
-  }
 
-  const { error } = await supabase.from("sensor_events").insert({
-    device_id,
-    motion,
-    ultra_close,
-    distance_cm: typeof distance_cm === "number" ? distance_cm : null,
-  });
-
-  if (error) return new Response(error.message, { status: 500 });
-
-  if (motion) {
+  if (motionFlag) {
     const { data: tokens } = await supabase
       .from("push_tokens")
       .select("token");
@@ -71,10 +65,11 @@ serve(async (req) => {
         body: JSON.stringify(message),
       });
     }
+
   }
 
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
-    headers: { "content-type": "application/json" },
+    headers: { "Content-Type": "application/json" },
   });
 });

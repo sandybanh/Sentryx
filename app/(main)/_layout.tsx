@@ -12,8 +12,8 @@ export default function MainLayout() {
         tabBarActiveTintColor: Colors.primary[500],
         tabBarInactiveTintColor: Colors.neutral[400],
         tabBarStyle: {
-          backgroundColor: Colors.neutral[0],
-          borderTopColor: Colors.neutral[200],
+          backgroundColor: Colors.background.secondary,
+          borderTopColor: Colors.background.secondary,
           paddingTop: 8,
           height: 88,
         },
@@ -61,6 +61,12 @@ export default function MainLayout() {
               color={color}
             />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="emergency-contacts"
+        options={{
+          href: null,
         }}
       />
     </Tabs>

@@ -151,3 +151,19 @@ export async function sendTestNotification(): Promise<void> {
     2
   );
 }
+
+const motionNotificationCache = new Set<string>();
+
+export async function notifyMotionEvent(eventId: string, deviceId: string) {
+  if (motionNotificationCache.has(eventId)) {
+    return;
+  }
+  motionNotificationCache.add(eventId);
+
+  await scheduleLocalNotification(
+    'Motion detected',
+    `Motion detected on ${deviceId}`,
+    { screen: 'camera', type: 'motion_alert', device_id: deviceId },
+    1
+  );
+}

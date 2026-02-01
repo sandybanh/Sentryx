@@ -14,7 +14,6 @@ import {
 } from '@/lib/notifications';
 import { useAuthStore } from '@/store/auth';
 
-// Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
 
 const splashFrames = [
@@ -34,10 +33,8 @@ function useProtectedRoute() {
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!user && !inAuthGroup) {
-      // User is not authenticated and not on auth screen
       router.replace('/(auth)/welcome');
     } else if (user && inAuthGroup) {
-      // User is authenticated but on auth screen
       router.replace('/(main)/camera');
     }
   }, [user, isInitialized, segments]);
@@ -47,23 +44,19 @@ function useNotificationHandler() {
   const router = useRouter();
 
   useEffect(() => {
-    // Handle notification when app is foregrounded
     const receivedSubscription = addNotificationReceivedListener((notification) => {
       console.log('Notification received:', notification.request.content);
     });
 
-    // Handle notification tap
     const responseSubscription = addNotificationResponseListener((response) => {
       const data = response.notification.request.content.data;
       console.log('Notification tapped:', data);
 
-      // Navigate based on notification data
       if (data?.screen === 'camera') {
         router.push('/(main)/camera');
       }
     });
 
-    // Check for notification that opened the app
     getLastNotificationResponse().then((response) => {
       if (response) {
         const data = response.notification.request.content.data;

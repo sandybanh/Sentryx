@@ -64,12 +64,10 @@ export default function SettingsScreen() {
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Settings</Text>
       </View>
 
-      {/* Profile Section */}
       <Text style={styles.sectionTitle}>Account</Text>
       <Card style={styles.profileCard}>
         <View style={styles.profileInfo}>
@@ -87,7 +85,17 @@ export default function SettingsScreen() {
         </View>
       </Card>
 
-      {/* Notifications Section */}
+      <Text style={styles.sectionTitle}>Safety</Text>
+      <Card style={styles.settingsGroup}>
+        <SettingRow
+          icon="people-outline"
+          label="Emergency Contacts"
+          description="Choose at least 3 contacts"
+          onPress={() => router.push('/(main)/emergency-contacts')}
+          showArrow
+        />
+      </Card>
+
       <Text style={styles.sectionTitle}>Notifications</Text>
       <Card style={styles.settingsGroup}>
         <SettingRow
@@ -133,7 +141,7 @@ export default function SettingsScreen() {
         />
       </Card>
 
-      {/* Camera Section */}
+      {/*
       <Text style={styles.sectionTitle}>Camera</Text>
       <Card style={styles.settingsGroup}>
         <SettingRow
@@ -152,8 +160,9 @@ export default function SettingsScreen() {
           showArrow
         />
       </Card>
+      */}
 
-      {/* Debug Section */}
+      {/*
       <Text style={styles.sectionTitle}>Developer</Text>
       <Card style={styles.settingsGroup}>
         <SettingRow
@@ -172,8 +181,8 @@ export default function SettingsScreen() {
           showArrow
         />
       </Card>
+      */}
 
-      {/* App Info */}
       <Text style={styles.sectionTitle}>About</Text>
       <Card style={styles.settingsGroup}>
         <SettingRow
@@ -197,14 +206,15 @@ export default function SettingsScreen() {
         />
       </Card>
 
-      {/* Sign Out */}
       <View style={styles.signOutContainer}>
         <Button
           title="Sign Out"
           onPress={handleSignOut}
-          variant="outline"
+          variant="primary"
           fullWidth
           loading={isLoading}
+          textStyle={{ color: Colors.primary[500] }}
+          style={{ backgroundColor: Colors.background.secondary }}
         />
       </View>
 
@@ -269,12 +279,12 @@ const styles = StyleSheet.create({
   title: {
     ...Typography.sizes['2xl'],
     fontWeight: Typography.weights.bold,
-    color: Colors.neutral[900],
+    color: Colors.neutral[0],
   },
   sectionTitle: {
     ...Typography.sizes.sm,
     fontWeight: Typography.weights.semibold,
-    color: Colors.neutral[500],
+    color: Colors.neutral[100],
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginTop: Spacing.xl,
@@ -283,6 +293,7 @@ const styles = StyleSheet.create({
   },
   profileCard: {
     padding: Spacing.lg,
+    backgroundColor: Colors.background.secondary,
   },
   profileInfo: {
     flexDirection: 'row',
@@ -293,7 +304,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: Colors.primary[50],
+    backgroundColor: Colors.neutral[0],
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -303,16 +314,17 @@ const styles = StyleSheet.create({
   profileEmail: {
     ...Typography.sizes.base,
     fontWeight: Typography.weights.semibold,
-    color: Colors.neutral[900],
+    color: Colors.neutral[0],
   },
   profileId: {
     ...Typography.sizes.sm,
-    color: Colors.neutral[500],
+    color: Colors.neutral[100],
     marginTop: 2,
   },
   settingsGroup: {
     padding: 0,
     overflow: 'hidden',
+    backgroundColor: Colors.background.secondary,
   },
   settingRow: {
     flexDirection: 'row',
@@ -324,7 +336,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 10,
-    backgroundColor: Colors.neutral[100],
+    backgroundColor: Colors.neutral[0],
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -334,16 +346,16 @@ const styles = StyleSheet.create({
   settingLabel: {
     ...Typography.sizes.base,
     fontWeight: Typography.weights.medium,
-    color: Colors.neutral[900],
+    color: Colors.neutral[0],
   },
   settingDescription: {
     ...Typography.sizes.sm,
-    color: Colors.neutral[500],
+    color: Colors.neutral[100],
     marginTop: 2,
   },
   divider: {
     height: 1,
-    backgroundColor: Colors.neutral[100],
+    backgroundColor: Colors.background.tertiary,
     marginLeft: Spacing.lg + 36 + Spacing.md,
   },
   signOutContainer: {

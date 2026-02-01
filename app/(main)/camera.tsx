@@ -8,11 +8,15 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  LayoutAnimation,
   Linking,
   Platform,
+  RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  UIManager,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,10 +26,10 @@ import { Button, Card, StatusBadge } from '@/components/ui';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { getEmergencyContacts, sendEmergencySms } from '@/lib/emergency';
 import { fetchRecentEvents, subscribeToEvents, SensorEvent } from '@/lib/alerts';
+import { notifyMotionEvent } from '@/lib/notifications';
+import { useAuthStore } from '@/store/auth';
+import * as Location from 'expo-location';
 
-// Webcam stream URL - supports:
-// - HLS (.m3u8): http://raspberrypi.tail56d975.ts.net:8080/stream.m3u8
-// - MediaMTX WebRTC: http://raspberrypi.tail56d975.ts.net:8889/cam/
 const VIDEO_STREAM_URL =
   process.env.EXPO_PUBLIC_VIDEO_STREAM_URL ??
   process.env.EXPO_PUBLIC_WEBCAM_URL ??
@@ -53,6 +57,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function CameraScreen() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   const videoRef = useRef<Video>(null);
   const webViewRef = useRef<WebView>(null);
   const [webViewKey, setWebViewKey] = useState(0);
@@ -71,6 +76,7 @@ export default function CameraScreen() {
 
   const deviceId = process.env.EXPO_PUBLIC_DEVICE_ID;
   const [events, setEvents] = useState<SensorEvent[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [debugInfo, setDebugInfo] = useState({
     lastFetchError: '',
     lastFetchAt: '',
@@ -78,20 +84,33 @@ export default function CameraScreen() {
   });
 
   useEffect(() => {
-    fetchRecentEvents(5, deviceId).then(({ data, error }) => {
-      setEvents(data);
-      setDebugInfo((prev) => ({
-        ...prev,
-        lastFetchError: error ?? '',
-        lastFetchAt: new Date().toLocaleTimeString(),
-      }));
-    });
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  const refreshEvents = useCallback(async () => {
+    setIsRefreshing(true);
+    const { data, error } = await fetchRecentEvents(5, deviceId);
+    setEvents(data);
+    setDebugInfo((prev) => ({
+      ...prev,
+      lastFetchError: error ?? '',
+      lastFetchAt: new Date().toLocaleTimeString(),
+    }));
+    setIsRefreshing(false);
   }, [deviceId]);
+
+  useEffect(() => {
+    refreshEvents();
+  }, [refreshEvents]);
 
   useEffect(() => {
     const unsubscribe = subscribeToEvents(
       (event) => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setEvents((prev) => [event, ...prev].slice(0, 5));
+        notifyMotionEvent(event.id, event.device_id || 'camera');
       },
       deviceId,
       (status) => {
@@ -99,6 +118,21 @@ export default function CameraScreen() {
       }
     );
     return unsubscribe;
+  }, [deviceId]);
+
+  useEffect(() => {
+    const poll = setInterval(() => {
+      fetchRecentEvents(5, deviceId).then(({ data, error }) => {
+        setEvents(data);
+        setDebugInfo((prev) => ({
+          ...prev,
+          lastFetchError: error ?? '',
+          lastFetchAt: new Date().toLocaleTimeString(),
+        }));
+      });
+    }, 3000);
+
+    return () => clearInterval(poll);
   }, [deviceId]);
 
   const recentEvents = useMemo(() => {
@@ -139,17 +173,14 @@ export default function CameraScreen() {
     return require('@/components/WebRTCCamera').WebRTCCamera as WebRTCCameraComponent;
   }, [useWebRTC]);
 
-  // Auto-connect when screen comes into focus (e.g. app startup, tab switch)
   useFocusEffect(
     useCallback(() => {
       setStatus('connecting');
       if (useHls) {
-        // HLS will load via Video component
       } else if (useWebView) {
         setWebViewKey((k) => k + 1);
       }
       getEmergencyContacts().then(setEmergencyContacts);
-      // WebRTC connects on mount
       return () => {};
     }, [useHls, useWebView])
   );
@@ -231,18 +262,27 @@ export default function CameraScreen() {
           onPress: async () => {
             try {
               setIsSendingHelp(true);
-              const message =
-                'Emergency alert from Sentryx. Please check my car camera feed and contact me.';
+              let locationText = '';
+              const { status } = await Location.requestForegroundPermissionsAsync();
+              if (status === 'granted') {
+                const position = await Location.getCurrentPositionAsync({});
+                const { latitude, longitude } = position.coords;
+                locationText = ` https://maps.google.com/?q=${latitude},${longitude}`;
+              }
 
-              await sendEmergencySms(message);
+              const name =
+                user?.user_metadata?.full_name ||
+                user?.email?.split('@')[0] ||
+                'A Sentryx user';
+              const message = `${name} has sent you an alert: here is their live location${locationText}`;
 
-              const numbers = emergencyContacts.map((c) => c.phone).join(',');
-              const smsUrl =
-                Platform.OS === 'ios'
-                  ? `sms:${numbers}&body=${encodeURIComponent(message)}`
-                  : `sms:${numbers}?body=${encodeURIComponent(message)}`;
-
-              await Linking.openURL(smsUrl);
+              const ok = await sendEmergencySms(message);
+              if (!ok) {
+                Alert.alert(
+                  'SMS failed',
+                  'Emergency SMS failed. Check your Supabase Edge Function logs or Twilio settings.'
+                );
+              }
 
               setTimeout(() => {
                 Linking.openURL('tel:911');
@@ -276,7 +316,6 @@ export default function CameraScreen() {
     }
   }, [isFullscreen, useHls]);
 
-  // Auto-hide controls after 3 seconds
   useEffect(() => {
     if (showControls && status === 'connected') {
       const timer = setTimeout(() => setShowControls(false), 3000);
@@ -286,11 +325,10 @@ export default function CameraScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Live Camera</Text>
-          <Text style={styles.subtitle}>Front Dashboard</Text>
+          <Text style={styles.subtitle}>Dash Cam</Text>
         </View>
         <StatusBadge
           label={getStatusLabel(status)}
@@ -299,7 +337,6 @@ export default function CameraScreen() {
         />
       </View>
 
-      {/* Video Container */}
       <TouchableOpacity
         style={styles.videoContainer}
         activeOpacity={1}
@@ -409,7 +446,6 @@ export default function CameraScreen() {
           </View>
         )}
 
-        {/* Video Controls Overlay */}
         {showControls && status === 'connected' && (
           <View style={styles.controlsOverlay}>
             <View style={styles.topControls}>
@@ -433,17 +469,19 @@ export default function CameraScreen() {
               <TouchableOpacity style={styles.controlButton} onPress={handleRetry}>
                 <Ionicons name="refresh" size={24} color={Colors.neutral[0]} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.controlButton} onPress={toggleFullscreen}>
-                <Ionicons name="expand" size={24} color={Colors.neutral[0]} />
-              </TouchableOpacity>
+              {useHls && (
+                <TouchableOpacity style={styles.controlButton} onPress={toggleFullscreen}>
+                  <Ionicons name="expand" size={24} color={Colors.neutral[0]} />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}
       </TouchableOpacity>
 
-      {/* Recent Events */}
       <View style={styles.eventsSection}>
         <Text style={styles.sectionTitle}>Recent events</Text>
+        {/*
         {__DEV__ && (
           <View style={styles.debugRow}>
             <Text style={styles.debugText}>
@@ -457,6 +495,7 @@ export default function CameraScreen() {
             )}
           </View>
         )}
+        */}
         <Button
           title="Contact help"
           onPress={handleContactHelp}
@@ -468,7 +507,21 @@ export default function CameraScreen() {
           style={styles.helpButton}
           textStyle={styles.helpButtonText}
         />
-        <View style={styles.eventsList}>
+        <ScrollView
+          style={styles.eventsScroll}
+          contentContainerStyle={[
+            styles.eventsList,
+            { paddingBottom: insets.bottom + Spacing.lg },
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={refreshEvents}
+              tintColor={Colors.primary[500]}
+            />
+          }
+        >
           {recentEvents.map((event) => (
             <Card key={event.id} style={styles.eventCard} variant="filled">
               <View style={styles.eventIcon}>
@@ -481,7 +534,7 @@ export default function CameraScreen() {
               {!!event.time && <Text style={styles.eventTime}>{event.time}</Text>}
             </Card>
           ))}
-        </View>
+        </ScrollView>
       </View>
     </View>
   );
@@ -650,6 +703,7 @@ const styles = StyleSheet.create({
   eventsSection: {
     marginHorizontal: Spacing.xl,
     marginTop: Spacing.xl,
+    flex: 1,
   },
   sectionTitle: {
     ...Typography.sizes.lg,
@@ -659,6 +713,9 @@ const styles = StyleSheet.create({
   },
   eventsList: {
     gap: Spacing.md,
+  },
+  eventsScroll: {
+    flex: 1,
   },
   debugRow: {
     marginBottom: Spacing.lg,

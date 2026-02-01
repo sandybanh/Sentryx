@@ -1,13 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Image,
+  LayoutAnimation,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  UIManager,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Card, StatusBadge, Logo } from '@/components/ui';
+import { Card, StatusBadge } from '@/components/ui';
+import { Colors, Shadows, Spacing, Typography } from '@/constants/theme';
+import { fetchRecentEvents, SensorEvent, subscribeToEvents } from '@/lib/alerts';
+import { notifyMotionEvent } from '@/lib/notifications';
 import { useAuthStore } from '@/store/auth';
-import { Colors, Typography, Spacing, Shadows } from '@/constants/theme';
-import { fetchRecentEvents, subscribeToEvents, SensorEvent } from '@/lib/alerts';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -15,6 +27,7 @@ export default function HomeScreen() {
   const { user } = useAuthStore();
   const deviceId = process.env.EXPO_PUBLIC_DEVICE_ID;
   const [events, setEvents] = useState<SensorEvent[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [debugInfo, setDebugInfo] = useState({
     lastFetchError: '',
     lastFetchAt: '',
@@ -22,20 +35,33 @@ export default function HomeScreen() {
   });
 
   useEffect(() => {
-    fetchRecentEvents(5, deviceId).then(({ data, error }) => {
-      setEvents(data);
-      setDebugInfo((prev) => ({
-        ...prev,
-        lastFetchError: error ?? '',
-        lastFetchAt: new Date().toLocaleTimeString(),
-      }));
-    });
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  const refreshEvents = useCallback(async () => {
+    setIsRefreshing(true);
+    const { data, error } = await fetchRecentEvents(5, deviceId);
+    setEvents(data);
+    setDebugInfo((prev) => ({
+      ...prev,
+      lastFetchError: error ?? '',
+      lastFetchAt: new Date().toLocaleTimeString(),
+    }));
+    setIsRefreshing(false);
   }, [deviceId]);
+
+  useEffect(() => {
+    refreshEvents();
+  }, [refreshEvents]);
 
   useEffect(() => {
     const unsubscribe = subscribeToEvents(
       (event) => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setEvents((prev) => [event, ...prev].slice(0, 5));
+        notifyMotionEvent(event.id, event.device_id || 'camera');
       },
       deviceId,
       (status) => {
@@ -43,6 +69,21 @@ export default function HomeScreen() {
       }
     );
     return unsubscribe;
+  }, [deviceId]);
+
+  useEffect(() => {
+    const poll = setInterval(() => {
+      fetchRecentEvents(5, deviceId).then(({ data, error }) => {
+        setEvents(data);
+        setDebugInfo((prev) => ({
+          ...prev,
+          lastFetchError: error ?? '',
+          lastFetchAt: new Date().toLocaleTimeString(),
+        }));
+      });
+    }, 3000);
+
+    return () => clearInterval(poll);
   }, [deviceId]);
 
   const latestAlerts = useMemo(() => {
@@ -70,18 +111,26 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Hey there!</Text>
-          <Text style={styles.email} numberOfLines={1}>
-            {user?.email ?? 'Welcome back'}
-          </Text>
+        <View style={styles.logoCrop}>
+          <Image
+            source={require('../../assets/images/Sentryx (1).png')}
+            style={styles.headerLogo}
+            resizeMode="cover"
+          />
         </View>
-        <Logo size="sm" showText={false} />
+        <Text style={styles.email} numberOfLines={1}>
+          {user?.email ?? 'Welcome back'}
+        </Text>
+        <TouchableOpacity
+          style={styles.userButton}
+          onPress={() => router.push('/(main)/settings')}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="person-circle" size={32} color={Colors.neutral[0]} />
+        </TouchableOpacity>
       </View>
 
-      {/* Live Feed Preview */}
       <TouchableOpacity
         style={styles.feedPreview}
         onPress={() => router.push('/(main)/camera')}
@@ -93,12 +142,12 @@ export default function HomeScreen() {
         </View>
         <View style={styles.feedOverlay}>
           <StatusBadge label="Live" variant="success" pulse />
-          <Text style={styles.feedTitle}>Front Camera</Text>
+          <Text style={styles.feedTitle}>Dash Cam</Text>
         </View>
       </TouchableOpacity>
 
-      {/* Latest Alerts */}
       <Text style={styles.sectionTitle}>Latest alerts</Text>
+      {/*
       {__DEV__ && (
         <View style={styles.debugRow}>
           <Text style={styles.debugText}>
@@ -112,7 +161,19 @@ export default function HomeScreen() {
           )}
         </View>
       )}
-      <View style={styles.alertsList}>
+      */}
+      <ScrollView
+        style={styles.alertsScroll}
+        contentContainerStyle={styles.alertsList}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={refreshEvents}
+            tintColor={Colors.primary[500]}
+          />
+        }
+      >
         {latestAlerts.map((alert) => (
           <Card key={alert.id} style={styles.alertCard} variant="filled">
             <View style={styles.alertIcon}>
@@ -125,8 +186,9 @@ export default function HomeScreen() {
             {!!alert.time && <Text style={styles.alertTime}>{alert.time}</Text>}
           </Card>
         ))}
-      </View>
+      </ScrollView>
 
+      <View style={styles.addCameraSpacer} />
       <TouchableOpacity
         style={styles.addCameraButton}
         onPress={() => router.push('/(main)/settings')}
@@ -149,20 +211,28 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: Spacing.xl,
+    gap: Spacing.md,
   },
-  greeting: {
-    ...Typography.sizes['2xl'],
-    fontWeight: Typography.weights.bold,
-    color: Colors.neutral[0],
+  logoCrop: {
+    width: 180,
+    height: 56,
+    overflow: 'hidden',
+  },
+  headerLogo: {
+    width: 180,
+    height: 180,
+    transform: [{ translateX: -18 }, { translateY: -78 }],
   },
   email: {
     ...Typography.sizes.sm,
     color: Colors.neutral[100],
-    marginTop: Spacing.xs,
-    maxWidth: 200,
+    maxWidth: 180,
+    alignSelf: 'center',
+  },
+  userButton: {
+    marginLeft: 'auto',
   },
   feedPreview: {
     height: 200,
@@ -202,9 +272,13 @@ const styles = StyleSheet.create({
     color: Colors.neutral[0],
     marginBottom: Spacing.lg,
   },
+  alertsScroll: {
+    maxHeight: 320,
+    marginBottom: 0,
+  },
   alertsList: {
     gap: Spacing.md,
-    marginBottom: Spacing.xl,
+    paddingBottom: Spacing.xs,
   },
   debugRow: {
     marginBottom: Spacing.lg,
@@ -261,6 +335,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     borderRadius: 16,
     ...Shadows.md,
+  },
+  addCameraSpacer: {
+    height: Spacing.lg,
   },
   addCameraIcon: {
     width: 36,

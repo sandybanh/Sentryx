@@ -16,6 +16,7 @@ export async function fetchRecentEvents(
   let query = supabase
     .from('sensor_events')
     .select('id, device_id, motion, ultra_close, distance_cm, ts')
+    .eq('motion', true)
     .order('ts', { ascending: false })
     .limit(limit);
 
@@ -45,7 +46,12 @@ export function subscribeToEvents(
       event: 'INSERT',
       schema: 'public',
       table: 'sensor_events',
-      ...(deviceId ? { filter: `device_id=eq.${deviceId}` } : {}),
+      filter: [
+        deviceId ? `device_id=eq.${deviceId}` : null,
+        'motion=eq.true',
+      ]
+        .filter(Boolean)
+        .join(','),
     },
     (payload) => {
       onInsert(payload.new as SensorEvent);

@@ -15,7 +15,11 @@
         "NSCameraUsageDescription": "Allow GirlCar to access your camera for video streaming",
         "NSMicrophoneUsageDescription": "Allow GirlCar to access your microphone for audio",
         "NSContactsUsageDescription": "Allow Sentryx to access your contacts for emergency alerts",
-        "UIBackgroundModes": ["remote-notification"],
+        "NSLocationWhenInUseUsageDescription": "Allow Sentryx to access your location for emergency alerts",
+        "UIBackgroundModes": [
+          "remote-notification",
+          "remote-notification"
+        ],
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
           "NSExceptionDomains": {
@@ -24,7 +28,8 @@
               "NSIncludesSubdomains": true
             }
           }
-        }
+        },
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -41,8 +46,11 @@
         "CAMERA",
         "RECORD_AUDIO",
         "READ_CONTACTS",
+        "ACCESS_FINE_LOCATION",
         "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE"
+        "VIBRATE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -68,9 +76,11 @@
       "reactCompiler": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "your-eas-project-id"
+        "projectId": "4b49173e-d66d-423a-be03-0fe8dfef434d"
       }
-    }
+    },
+    "owner": "mhashmi"
   }
 }

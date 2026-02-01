@@ -60,7 +60,7 @@ export default function SignupScreen() {
       Alert.alert(
         'Emergency contacts',
         'Next, choose 3 emergency contacts. If email confirmation is required, you can finish after verifying.',
-        [{ text: 'OK', onPress: () => router.replace('/(auth)/emergency-contacts') }]
+        [{ text: 'OK', onPress: () => router.replace('/(main)/emergency-contacts') }]
       );
     }
   };

@@ -34,13 +34,17 @@ Deno.serve(async (req) => {
     }
 
     const authHeader = req.headers.get('Authorization') ?? '';
+    console.log('Auth header present:', !!authHeader, 'starts with Bearer:', authHeader.startsWith('Bearer '));
+
     const supabase = createClient(supabaseUrl, serviceRoleKey, {
       global: { headers: { Authorization: authHeader } },
     });
 
     const { data: userData, error: userError } = await supabase.auth.getUser();
+    console.log('getUser result:', userError ? `error: ${userError.message}` : `user: ${userData?.user?.id}`);
+
     if (userError || !userData?.user) {
-      return new Response(JSON.stringify({ success: false, error: 'Unauthorized' }), {
+      return new Response(JSON.stringify({ success: false, error: 'Unauthorized', details: userError?.message }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 401,
       });
@@ -98,6 +102,14 @@ Deno.serve(async (req) => {
         return { to, ok: true };
       })
     );
+
+    const failed = sendResults.filter((result) => !result.ok);
+    if (failed.length) {
+      return new Response(JSON.stringify({ success: false, error: failed }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500,
+      });
+    }
 
     return new Response(JSON.stringify({ success: true, results: sendResults }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
