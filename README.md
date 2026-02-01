@@ -1,1 +1,1 @@
-# Sentrix
+# Sentryx
