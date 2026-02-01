@@ -1,0 +1,8 @@
+.env 
+*.env
+ellehacks_env/
+__pycache__/
+detections/
+coordinates_log.json/
+face_database_fast.pkl
+

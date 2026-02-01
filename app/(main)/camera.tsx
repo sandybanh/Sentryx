@@ -24,8 +24,8 @@ import { WebView } from 'react-native-webview';
 
 import { Button, Card, StatusBadge } from '@/components/ui';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
+import { fetchRecentEvents, SensorEvent, subscribeToEvents } from '@/lib/alerts';
 import { getEmergencyContacts, sendEmergencySms } from '@/lib/emergency';
-import { fetchRecentEvents, subscribeToEvents, SensorEvent } from '@/lib/alerts';
 import { notifyMotionEvent } from '@/lib/notifications';
 import { useAuthStore } from '@/store/auth';
 import * as Location from 'expo-location';

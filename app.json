@@ -12,8 +12,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.sentryx.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow GirlCar to access your camera for video streaming",
-        "NSMicrophoneUsageDescription": "Allow GirlCar to access your microphone for audio",
+        "NSCameraUsageDescription": "Allow Sentryx to access your camera for video streaming",
+        "NSMicrophoneUsageDescription": "Allow Sentryx to access your microphone for audio",
         "NSContactsUsageDescription": "Allow Sentryx to access your contacts for emergency alerts",
         "NSLocationWhenInUseUsageDescription": "Allow Sentryx to access your location for emergency alerts",
         "UIBackgroundModes": [
