@@ -1,0 +1,24 @@
+# GirlCar WebRTC Auto-Start Systemd Service
+# Copy to Pi: scp girlcar-webrtc.service me@raspberrypi:~/
+# Then on Pi: sudo cp ~/girlcar-webrtc.service /etc/systemd/system/
+#            sudo systemctl daemon-reload
+#            sudo systemctl enable girlcar-webrtc
+#            sudo systemctl start girlcar-webrtc
+
+[Unit]
+Description=GirlCar WebRTC Camera Stream (MediaMTX + FFmpeg)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=me
+
+# Start MediaMTX first
+ExecStartPre=/bin/sleep 5
+ExecStart=/home/me/start-girlcar-webrtc.sh
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
